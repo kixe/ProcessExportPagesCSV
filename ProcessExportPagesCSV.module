@@ -1,0 +1,298 @@
+<?php namespace ProcessWire;
+
+/**
+ * ProcessExportPagesCSV
+ * Module to be implemented by other Process to provide CSV export
+ *
+ *
+ * @author kixe (Christoph Thelen) note@qualyweb.com 2022-02-10
+ * @copyright © 2022 Christoph Thelen
+ * @license Licensed under GNU/GPL v3
+ * @link http://qualyweb.com
+ * 
+ * made for ProcessWire 3.x by Ryan Cramer 
+ * http://processwire.com
+ *
+ * @version 1.0.0
+ *
+ * changelog
+ * @since 1.0.0 - init 2022-02-10
+ *
+ */
+
+class ProcessExportPagesCSV extends Process {
+
+	/**
+	 * @var InputfieldForm
+	 * 
+	 */
+	protected $form;
+
+	/**
+	 * @var PHP Array of Column headers and assigned page properties or page field names
+	 * 
+	 */
+	public $exportColumns = array();
+
+	/**
+	 * @var PHP Array of selectable fields in Selector field for data export
+	 * 
+	 */
+	public $exportSelectorFields = array();
+
+	/**
+	 * @return array
+	 * 
+	 */
+	public static function getModuleInfo() {
+		return array(
+			'title' => __('Export Pages Data CSV', __FILE__),          
+			'summary' => __('Module to be implemented by other Processes to provide CSV export.', __FILE__), 
+			'version' => 100, 
+			'permission' => 'export-csv',
+			'icon' => 'download',
+			'permissions' => array('export-csv' => 'Allow Data Export via CSV Download'),
+		);
+	}
+
+	/**
+	 * 
+	 * @return string
+	 * 
+	 */
+	public function ___render() {
+		$input = $this->wire('input');
+		$exportForm = $this->buildExportForm();
+		$exportForm->setTrackChanges();
+		if ($input->post('submit_export_csv')) {
+			$exportForm = $this->processInputExport($exportForm);
+		}
+		return $exportForm->render();
+	}	
+
+	/**
+	 * Build the form fields for exports
+	 * 
+	 * @return InputfieldForm
+	 * @throws WireException
+	 *
+	 */
+	protected function ___buildExportForm() {
+
+		$form = $this->modules->get('InputfieldForm');
+		if (wire('input')->queryString) $form->action = "./?" . wire('input')->queryString;
+		$initValue = trim($this->export_selector_init,"\x00..\x20,");
+
+		$form->attr('id', 'ProcessExportPagesCSV'); 
+		// $form->addClass('InputfieldFormFocusFirst');
+		$form->attr('method', 'post');
+
+		$f = $this->modules->get('InputfieldMarkup');
+		$text =  "<h2><i class='fa fa-download'></i>&nbsp;" . $this->_('Export Pages Data')  . "</h2>";
+		$text .= "<p>" . $this->_('Click the button to download a CSV file of pages data according to selector.')."<br/>";
+		$text .= $this->_('The following basic selector is used for filtering:')."<br/>";
+		$text .= "<span class=\"uk-text-muted small\">$initValue</span>";
+
+		$f->set('markupText', $text);
+		$form->append($f);
+
+		$f = $this->modules->get('InputfieldSelector');
+		$f->attr('id+name', 'expo'); 
+		$f->label = $this->_('Further filtering');
+		$f->set('addLabel', $this->_('Add Filter'));
+		$f->initValue = $initValue;
+
+		$previewColumns = [];
+		foreach ($this->exportColumns as $exportColumn) {
+			$parts = explode('.', $exportColumn);
+			if (strpos(end($parts), '{') !== false || strpos(end($parts), '[') !== false) {
+				array_pop($parts);
+				$previewColumns[] = implode('.', $parts);
+			}
+			else $previewColumns[] = $exportColumn;
+		}
+		$f->previewColumns = $previewColumns;
+
+		$exclude = array();
+		if (!empty($this->exportSelectorFields)) {
+			foreach (wire('fields') as $field) {
+				if (in_array($field->name, $this->exportSelectorFields)) continue;
+				$exclude[] = $field->name;
+			}
+		}
+		
+		// $f->limitFields = array();
+		// we use exclude instead
+		//  $f->exclude = $exclude;
+
+		$f->showFieldLabels = 1; // 0: show names (default), 1: show labels, 2: show both (label [name])
+		$f->allowSubselectors = true;
+		$f->allowSubfields = true;
+		$f->optgroupsOrder = 'system,field,subfield,modifier';
+
+		$form->append($f);
+
+		$f = $this->modules->get('InputfieldSubmit');
+		$f->attr('name', 'submit_export_csv'); 
+		$f->attr('icon', $this->_("download")); 
+		$f->attr('value', $this->_('Download CSV File')); 
+		$form->append($f);
+
+		return $form;
+	}
+
+	protected function ___processInputExport(InputfieldForm $form) {
+		$input = $this->input->post;
+		$form->processInput($input);
+		$selector = implode(', ',array($form->expo->initValue, $form->expo->value));
+		if ($selector) {
+			$data = $this->createDataArray($selector);
+			$this->export($data); // no further processing
+		}
+		return $form;
+	}
+
+	protected function createDataArray($selector) {
+		$data = array();
+		$pages = $this->wire('pages')->find($selector);
+		foreach ($pages as $page) {
+			$data[] = $this->createDataRow($page, $this->exportColumns);
+		}
+		return $data;
+	}
+
+	/**
+	 * create array of column headers as keys and page-properties or page-field-values as value
+	 *
+	 * @param object $page
+	 * @param array $values
+	 * @return  array 
+	 *
+	 */	
+	protected function createDataRow(Page $page, $values = array('ID' => 'id', 'NAME' => 'name')) {
+		$row = array();
+		foreach ($values as $label => $fieldname) {
+			$field = wire('fields')->get($fieldname);
+			if ($field && $field->type == 'FieldtypeOptions') {
+				foreach($field->type->manager->getOptions($field) as $option) {
+					$row[$label . ' – ' . $option->getTitle()] = 0; 		
+				}
+			}
+			else {
+				$row[$label] = $this->___getPageValue($page, $fieldname);
+				continue;
+			}
+			if ($page->$fieldname instanceof SelectableOptionArray) {
+				foreach ($page->$fieldname as $val) {
+					$row[$label . ' – ' . $val['title']] = 1;
+				}
+			}
+		}
+	    return $row;		
+	}
+
+	/**
+	 * get a page property or unformatted field value
+	 *
+	 * @param object $page
+	 * @param string $name property or fieldname, use dot syntax for subfields/ properties
+	 * @return  string
+	 * @todo optimize values for csv export @see ProcessPageLister::buildListerTableCol()
+	 * @todo allow OR groups '|'
+	 *
+	 */	
+	protected function ___getPageValue(Page $page, $name = null, $names = array(), $array = false) {
+		// quick exit
+		if (!$name && empty($names)) return '';
+		$values = array();
+		$page->of(false);
+		// subfield or subproperty
+		if(strpos($name, '.')) $names = explode('.', $name);
+		else if (strlen($name)) $names = array($name);
+		$name = null;
+		if (count($names)) {
+			$prop = array_shift($names);
+			$res = $page->get($prop);
+			if ((is_array($res) && !empty($res)) || ($res instanceof WireArray && $res->count())) {
+				$nextprop = reset($names);
+				if (count($names) == 1 && $nextprop == 'count') {
+					if (is_array($res)) return (string) count($res);
+					else return (string) $res->count();
+				}
+				if ($nextprop == 'first') {
+					array_shift($names);
+					$res = is_array($res)? array_slice($res, 0, 1) : $res->slice(0, 1);
+				}
+				else if ($nextprop == 'last') {
+					array_shift($names);
+					$res = is_array($res)? array_slice($res, -1, 1) : $res->slice(-1, 1);
+				}
+				foreach ($res as $item) {
+					if ($item instanceof Page) {
+						if (empty($names)) $values[] = $item->getFormatted('title|name');
+						else if (count($names) == 1 && strpos($nextprop,'{') !== false && strpos($nextprop, '}')) {
+							$values[] = $item->getMarkup($nextprop);
+						}
+						else if (count($names) == 1 && strpos($nextprop,'[') !== false && strpos($nextprop, ']')) {
+							$prop = wirePopulateStringTags($nextprop, $page, ['tagOpen' => '[', 'tagClose' => ']']);
+							$values[] = $item->$prop;
+						}
+						else $values = array_merge($values, $this->___getPageValue($item, null, $names, true));
+						continue;
+					}
+					if (is_object($item) && count($names) == 1 && method_exists($item, 'get')) {
+						$values[] = $item->get($names[0]);
+						continue;
+					}
+					if (is_string($item) || is_numeric($item) || (is_object($item) && method_exists($item, '__toString'))) $values[] = "$item";
+				}
+			}
+			else if ($res instanceof Page) {
+				$values[] = $this->___getPageValue($res, null, $names);
+			}
+			else if ($obj = is_object($res) || is_string($res) || is_numeric($res)) {
+
+				$res = $page->getFormatted($prop);
+				if (!$res && $obj && method_exists($res, '__toString')) {
+					$res = $page->get($prop);
+				}
+				$values[] = "$res";
+			}
+			else $values[] = '';
+		}
+		foreach ($values as &$value) {
+			if ($value === null) $value = 'NULL';
+			if ($value === '') $value = '…'; // empty string, elipsis
+			if (strpos($value, '&') !== false) $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML401 | ENT_XML1 | ENT_XHTML | ENT_HTML5, 'UTF-8');
+			if (strpos($value, '<') !== false) $value = strip_tags($value);
+		}
+		// $values = array_unique(array_filter($values,'strlen'));
+		if ($array) return $values;
+		if (empty($values)) return '';
+		return implode(stripcslashes($this->export_multi_separator), $values);
+	}
+
+	// export data array as CSV
+	public function export($data, $filename = 'file', $options = array()) {
+		$defaultOptions = array(
+			'delimiter' => ',',
+			'enclosure' => '"',
+			'escape_char' => "\\"
+		);
+		$options = array_merge($defaultOptions, $options);
+		if (empty($data)) die('missing data');
+		// set header
+		header("Content-type: text/csv");
+		header("Content-Disposition: attachment; filename=$filename.csv");
+		header("Pragma: no-cache");
+		header("Expires: 0");
+		$output = fopen("php://output", "wb");
+		// write column lables
+		fputcsv($output, array_keys(reset($data)), $options['delimiter'], $options['enclosure'], $options['escape_char']);
+		// write data
+		foreach ($data as $fields) fputcsv($output, $fields, $options['delimiter'], $options['enclosure'], $options['escape_char']);
+		fclose($output);
+		exit;
+	}
+}
+
