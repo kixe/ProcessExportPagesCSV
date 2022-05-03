@@ -13,10 +13,11 @@
  * made for ProcessWire 3.x by Ryan Cramer 
  * http://processwire.com
  *
- * @version 1.0.0
+ * @version 1.0.1
  *
  * changelog
  * @since 1.0.0 - init 2022-02-10
+ * @since 1.0.1 - fixed_bugs: wrong type as 1st argument in function method_exists(); user language sensitive option keys in data row 2022-05-03
  *
  */
 
@@ -48,7 +49,7 @@ class ProcessExportPagesCSV extends Process {
 		return array(
 			'title' => __('Export Pages Data CSV', __FILE__),          
 			'summary' => __('Module to be implemented by other Processes to provide CSV export.', __FILE__), 
-			'version' => 100, 
+			'version' => 101, 
 			'permission' => 'export-csv',
 			'icon' => 'download',
 			'permissions' => array('export-csv' => 'Allow Data Export via CSV Download'),
@@ -163,6 +164,7 @@ class ProcessExportPagesCSV extends Process {
 
 	/**
 	 * create array of column headers as keys and page-properties or page-field-values as value
+	 * one – language sensitive labeled – column per each option if FieldtypeOptions is used
 	 *
 	 * @param object $page
 	 * @param array $values
@@ -175,16 +177,18 @@ class ProcessExportPagesCSV extends Process {
 			$field = wire('fields')->get($fieldname);
 			if ($field && $field->type == 'FieldtypeOptions') {
 				foreach($field->type->manager->getOptions($field) as $option) {
-					$row[$label . ' – ' . $option->getTitle()] = 0; 		
+					$row[$label . ' – ' . $option->getTitle()] = 0; // user language sensitive		
 				}
 			}
 			else {
 				$row[$label] = $this->___getPageValue($page, $fieldname);
 				continue;
 			}
+			$language = wire('user')->language;
+			$languageID = $language->isDefault()? '' : "$language->id";
 			if ($page->$fieldname instanceof SelectableOptionArray) {
 				foreach ($page->$fieldname as $val) {
-					$row[$label . ' – ' . $val['title']] = 1;
+					$row[$label . ' – ' . $val["title$languageID"]] = 1; // user language sensitive
 				}
 			}
 		}
@@ -196,12 +200,14 @@ class ProcessExportPagesCSV extends Process {
 	 *
 	 * @param object $page
 	 * @param string $name property or fieldname, use dot syntax for subfields/ properties
-	 * @return  string
+	 * @param array $names INTERNAL USE ONLY
+	 * @param bool $returnArray
+	 * @return  string|array
 	 * @todo optimize values for csv export @see ProcessPageLister::buildListerTableCol()
 	 * @todo allow OR groups '|'
 	 *
 	 */	
-	protected function ___getPageValue(Page $page, $name = null, $names = array(), $array = false) {
+	protected function ___getPageValue(Page $page, $name = null, $names = array(), $returnArray = false) {
 		// quick exit
 		if (!$name && empty($names)) return '';
 		$values = array();
@@ -244,7 +250,7 @@ class ProcessExportPagesCSV extends Process {
 						$values[] = $item->get($names[0]);
 						continue;
 					}
-					if (is_string($item) || is_numeric($item) || (is_object($item) && method_exists($item, '__toString'))) $values[] = "$item";
+					if (is_string($item) || is_numeric($item) || (is_object($item) && method_exists("$item", '__toString'))) $values[] = "$item";
 				}
 			}
 			else if ($res instanceof Page) {
@@ -253,7 +259,7 @@ class ProcessExportPagesCSV extends Process {
 			else if ($obj = is_object($res) || is_string($res) || is_numeric($res)) {
 
 				$res = $page->getFormatted($prop);
-				if (!$res && $obj && method_exists($res, '__toString')) {
+				if (!$res && $obj && method_exists("$res", '__toString')) {
 					$res = $page->get($prop);
 				}
 				$values[] = "$res";
@@ -267,7 +273,7 @@ class ProcessExportPagesCSV extends Process {
 			if (strpos($value, '<') !== false) $value = strip_tags($value);
 		}
 		// $values = array_unique(array_filter($values,'strlen'));
-		if ($array) return $values;
+		if ($returnArray) return $values;
 		if (empty($values)) return '';
 		return implode(stripcslashes($this->export_multi_separator), $values);
 	}
@@ -287,7 +293,7 @@ class ProcessExportPagesCSV extends Process {
 		header("Pragma: no-cache");
 		header("Expires: 0");
 		$output = fopen("php://output", "wb");
-		// write column lables
+		// write column labels
 		fputcsv($output, array_keys(reset($data)), $options['delimiter'], $options['enclosure'], $options['escape_char']);
 		// write data
 		foreach ($data as $fields) fputcsv($output, $fields, $options['delimiter'], $options['enclosure'], $options['escape_char']);
