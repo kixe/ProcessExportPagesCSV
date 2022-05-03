@@ -13,12 +13,13 @@
  * made for ProcessWire 3.x by Ryan Cramer 
  * http://processwire.com
  *
- * @version 1.0.2
+ * @version 1.0.3
  *
  * changelog
- * @since 1.0.0 - init 2022-02-10
- * @since 1.0.1 - fixed_bugs: wrong type as 1st argument in function method_exists(); user language sensitive option keys in data row 2022-05-03
- * @since 1.0.2 - ignore runtime fields like FieldtypeMarkup 2022-05-03
+ * @since 1.0.0 - init - 2022-02-10
+ * @since 1.0.1 - fixed_bugs: wrong type as 1st argument in function method_exists(); user language sensitive option keys in data row - 2022-05-03
+ * @since 1.0.2 - ignore runtime fields like FieldtypeMarkup - 2022-05-03
+ * @since 1.0.3 - fixed bug: fallback to default language if option titles not set in user language - 2022-05-03
  *
  */
 
@@ -50,7 +51,7 @@ class ProcessExportPagesCSV extends Process {
 		return array(
 			'title' => __('Export Pages Data CSV', __FILE__),          
 			'summary' => __('Module to be implemented by other Processes to provide CSV export.', __FILE__), 
-			'version' => 102, 
+			'version' => 103, 
 			'permission' => 'export-csv',
 			'icon' => 'download',
 			'permissions' => array('export-csv' => 'Allow Data Export via CSV Download'),
@@ -190,7 +191,9 @@ class ProcessExportPagesCSV extends Process {
 			$languageID = $language->isDefault()? '' : "$language->id";
 			if ($page->$fieldname instanceof SelectableOptionArray) {
 				foreach ($page->$fieldname as $val) {
-					$row[$label . ' – ' . $val["title$languageID"]] = 1; // user language sensitive
+					$title = $val["title$languageID"];
+					if (empty($title)) $title = $val['title']; // fallback to default
+					$row["$label – $title"] = 1; // user language sensitive
 				}
 			}
 		}
