@@ -13,11 +13,12 @@
  * made for ProcessWire 3.x by Ryan Cramer 
  * http://processwire.com
  *
- * @version 1.0.1
+ * @version 1.0.2
  *
  * changelog
  * @since 1.0.0 - init 2022-02-10
  * @since 1.0.1 - fixed_bugs: wrong type as 1st argument in function method_exists(); user language sensitive option keys in data row 2022-05-03
+ * @since 1.0.2 - ignore runtime fields like FieldtypeMarkup 2022-05-03
  *
  */
 
@@ -49,7 +50,7 @@ class ProcessExportPagesCSV extends Process {
 		return array(
 			'title' => __('Export Pages Data CSV', __FILE__),          
 			'summary' => __('Module to be implemented by other Processes to provide CSV export.', __FILE__), 
-			'version' => 101, 
+			'version' => 102, 
 			'permission' => 'export-csv',
 			'icon' => 'download',
 			'permissions' => array('export-csv' => 'Allow Data Export via CSV Download'),
@@ -175,6 +176,7 @@ class ProcessExportPagesCSV extends Process {
 		$row = array();
 		foreach ($values as $label => $fieldname) {
 			$field = wire('fields')->get($fieldname);
+			if ($field && $field->type == 'FieldtypeMarkup') continue;
 			if ($field && $field->type == 'FieldtypeOptions') {
 				foreach($field->type->manager->getOptions($field) as $option) {
 					$row[$label . ' – ' . $option->getTitle()] = 0; // user language sensitive		
