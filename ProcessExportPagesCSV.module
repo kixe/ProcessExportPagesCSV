@@ -22,6 +22,7 @@
  * @since 1.0.3 - fixed bug: fallback to default language if option titles not set in user language - 2022-05-03
  * @since 1.0.4 - made some functions public / hookable - 2023-03-14
  * @since 1.0.5 - added export options - 2023-06-28
+ * @todo add ASM Select to filter and order columns for export including user fields
  *
  */
 
@@ -202,7 +203,7 @@ class ProcessExportPagesCSV extends Process {
 		$f->columnWidth = 33;
 		$form->append($f);
 
-		// TODO add ASM Select to filter and order columns for export
+		// TODO add ASM Select to filter and order columns for export including user fields
 
 		// select created user fields (if populated) to be added to the export
 		$f = $this->modules->get('InputfieldCheckboxes');
