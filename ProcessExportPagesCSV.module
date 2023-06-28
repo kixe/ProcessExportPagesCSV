@@ -13,13 +13,15 @@
  * made for ProcessWire 3.x by Ryan Cramer 
  * http://processwire.com
  *
- * @version 1.0.3
+ * @version 1.0.5
  *
  * changelog
  * @since 1.0.0 - init - 2022-02-10
  * @since 1.0.1 - fixed_bugs: wrong type as 1st argument in function method_exists(); user language sensitive option keys in data row - 2022-05-03
  * @since 1.0.2 - ignore runtime fields like FieldtypeMarkup - 2022-05-03
  * @since 1.0.3 - fixed bug: fallback to default language if option titles not set in user language - 2022-05-03
+ * @since 1.0.4 - made some functions public / hookable - 2023-03-14
+ * @since 1.0.5 - added export options - 2023-06-28
  *
  */
 
@@ -44,6 +46,49 @@ class ProcessExportPagesCSV extends Process {
 	public $exportSelectorFields = array();
 
 	/**
+	 * @var inner separator if a single page field value is of type multiple 
+	 * 
+	 */
+	public $export_multi_separator = "\n";
+
+	/**
+	 * @var bool if value is instance of SelectableOptionsArray create a column for each option 
+	 * 
+	 */
+	public $export_options_per_column = false;
+
+	/**
+	 * @var use option labels instead of option values (if set) or option ids if value instance of SelectableOption option 
+	 * 
+	 */
+	public $export_options_labels = true;
+
+	/**
+	 * @var use "yes" or "no" instead of 0 and 1 in case of checkboxes or SelectableOptionsArray per column
+	 * 
+	 */
+	public $export_binary_text = false;
+
+	/**
+	 * @var init / default selector for export selector field 
+	 * 
+	 */
+	public $export_selector_init = '';
+
+
+	/**
+	 * @var placeholder in empty (elipsis)
+	 * 
+	 */
+	public $placeholder_empty = '…';
+
+	/**
+	 * @var placeholder if NULL text 'NULL'
+	 * 
+	 */
+	public $placeholder_null = 'NULL';
+
+	/**
 	 * @return array
 	 * 
 	 */
@@ -51,8 +96,9 @@ class ProcessExportPagesCSV extends Process {
 		return array(
 			'title' => __('Export Pages Data CSV', __FILE__),          
 			'summary' => __('Module to be implemented by other Processes to provide CSV export.', __FILE__), 
-			'version' => 103, 
+			'version' => 105, 
 			'permission' => 'export-csv',
+			'autoload' => 'template=admin',
 			'icon' => 'download',
 			'permissions' => array('export-csv' => 'Allow Data Export via CSV Download'),
 		);
@@ -135,6 +181,46 @@ class ProcessExportPagesCSV extends Process {
 
 		$form->append($f);
 
+		$f = $this->modules->get('InputfieldCheckbox');
+		$f->attr('id+name', 'exportOptionsPerColumn');
+		$f->label = $this->_('Export selectable options as one per column if multiple selectable.');
+		$f->attr('checked', $this->export_options_per_column);
+		$f->columnWidth = 33;
+		$form->append($f);
+
+		$f = $this->modules->get('InputfieldCheckbox');
+		$f->attr('id+name', 'exportOptionsLabels');
+		$f->label = $this->_('Export option labels instead of option values (if set) or option ids (default).');
+		$f->attr('checked', $this->export_options_labels);
+		$f->columnWidth = 33;
+		$form->append($f);
+
+		$f = $this->modules->get('InputfieldCheckbox');
+		$f->attr('id+name', 'exportBinaryText');
+		$f->label = $this->_("Export text 'yes'/'no' instead of '0' / '1' in case of binary values (e.g. Checkboxes)");
+		$f->attr('checked', $this->export_binary_text);
+		$f->columnWidth = 33;
+		$form->append($f);
+
+		// TODO add ASM Select to filter and order columns for export
+
+		// select created user fields (if populated) to be added to the export
+		$f = $this->modules->get('InputfieldCheckboxes');
+		$f->attr('id+name', 'userFields');
+		$f->label = $this->_('Created user fields to be added to each page data set');
+		$f->optionColumns = 3;
+		// $f->optionWidth = 1;
+		$lang = wire('user')->language->isDefault()? '' : wire('user')->language->id;
+		$userFields = wire('templates')->get('user')->fields->sort("label$lang, label, name");
+		foreach($userFields as $option) {
+			if (strpos($option->type->name, 'FieldtypeFieldset') === 0) continue;
+			if ($option->type->name == 'FieldtypePassword') continue;
+			if (in_array($f->name, ['page_icon'])) continue;
+			$option = $option->getContext('user');
+			$f->addOption($option->id, $option->get("label$lang|label|name"));
+		}
+		$form->append($f);
+
 		$f = $this->modules->get('InputfieldSubmit');
 		$f->attr('name', 'submit_export_csv'); 
 		$f->attr('icon', $this->_("download")); 
@@ -146,20 +232,37 @@ class ProcessExportPagesCSV extends Process {
 
 	protected function ___processInputExport(InputfieldForm $form) {
 		$input = $this->input->post;
+		$lang = wire('user')->language->isDefault()? '' : wire('user')->language->id;
 		$form->processInput($input);
+
+		$this->export_options_per_column = $form->exportOptionsPerColumn->value? true : false;
+		$this->export_options_labels = $form->exportOptionsLabels->value? true : false;
+		$this->export_binary_text = $form->exportBinaryText->value? true : false;
+
 		$selector = implode(', ',array($form->expo->initValue, $form->expo->value));
 		if ($selector) {
-			$data = $this->createDataArray($selector);
+			$exportColumns = [];
+			if (!empty($form->userFields->attr('value'))) {
+				foreach ($form->userFields->attr('value') as $userField) {
+					$f = wire('fields')->get($userField);
+					$key = 'label|name';
+					if (!wire('user')->language->isDefault()) $key = 'label' . wire('user')->language->id . '|label|name';
+					$exportColumns[$f->get($key)] = 'createdUser.' . $f->name;
+				}
+			}
+			$exportColumns = array_merge($this->exportColumns, $exportColumns);
+			$data = $this->createDataArray($selector, $exportColumns);
 			$this->export($data); // no further processing
 		}
+
 		return $form;
 	}
 
-	protected function createDataArray($selector) {
+	public function createDataArray($selector, $exportColumns) {
 		$data = array();
 		$pages = $this->wire('pages')->find($selector);
 		foreach ($pages as $page) {
-			$data[] = $this->createDataRow($page, $this->exportColumns);
+			$data[] = $this->createDataRow($page, $exportColumns);
 		}
 		return $data;
 	}
@@ -178,22 +281,33 @@ class ProcessExportPagesCSV extends Process {
 		foreach ($values as $label => $fieldname) {
 			$field = wire('fields')->get($fieldname);
 			if ($field && $field->type == 'FieldtypeMarkup') continue;
-			if ($field && $field->type == 'FieldtypeOptions') {
-				foreach($field->type->manager->getOptions($field) as $option) {
-					$row[$label . ' – ' . $option->getTitle()] = 0; // user language sensitive		
+			if ($field && $field->type == 'FieldtypeCheckbox') {
+				$fieldValue = $page->$fieldname;
+				if ($fieldValue && $this->export_binary_text) $fieldValue = $this->_('yes');
+				else if ($this->export_binary_text) $fieldValue = $this->_('no');
+				$row[$label] = $fieldValue;
+			} else if ($this->export_options_per_column && $field && $field->type == 'FieldtypeOptions') {
+				$inputfieldClass = $field->get('inputfieldClass');
+				if (in_array($inputfieldClass, ['InputfieldRadios','InputfieldSelect']) == false) {
+					foreach($field->type->manager->getOptions($field) as $option) {
+						$row[$label . ' – ' . $option->getTitle()] = $this->export_binary_text? $this->_('no') : 0; // title user language sensitive		
+					}
+				} else {
+					$row[$label] = $this->getPageValue($page, $fieldname);
+					continue;
 				}
-			}
-			else {
-				$row[$label] = $this->___getPageValue($page, $fieldname);
+			} else {
+				$row[$label] = $this->getPageValue($page, $fieldname);
 				continue;
 			}
 			$language = wire('user')->language;
 			$languageID = $language->isDefault()? '' : "$language->id";
-			if ($page->$fieldname instanceof SelectableOptionArray) {
+
+			if ($this->export_options_per_column && $page->$fieldname instanceof SelectableOptionArray && in_array($field->get('inputfieldClass'), ['InputfieldRadios','InputfieldSelect']) == false) {
 				foreach ($page->$fieldname as $val) {
 					$title = $val["title$languageID"];
 					if (empty($title)) $title = $val['title']; // fallback to default
-					$row["$label – $title"] = 1; // user language sensitive
+					$row["$label – $title"] = $this->export_binary_text? $this->_('yes') : 1; // title user language sensitive
 				}
 			}
 		}
@@ -224,7 +338,31 @@ class ProcessExportPagesCSV extends Process {
 		if (count($names)) {
 			$prop = array_shift($names);
 			$res = $page->get($prop);
-			if ((is_array($res) && !empty($res)) || ($res instanceof WireArray && $res->count())) {
+
+			if ($res instanceof SelectableOptionArray) {
+				$row = [];
+				foreach ($res as $selectedOption) $row[] = $this->export_options_labels? $selectedOption->getTitle() : $selectedOption->get('value|id');
+				$values[] = implode(", ", $row);
+			}
+
+			else if ($res instanceof SelectableOption) {
+				$values[] = $this->export_options_labels? $res->getTitle() : $res->get('value|id');
+			}
+
+			else if ($res instanceof TableRows) {
+				$cols = $res->getColumns();
+				if (is_array($cols)) {
+					$rows = [];
+					foreach ($res as $tableRow) {
+						$row = [];
+						foreach ($cols as $col) $row[] = "$col[label]: " . $tableRow->{"$col[name]"};
+						$rows[] = implode("; ",$row);
+					}
+					$values[] = implode("\n",$rows);
+				}
+			}
+
+			else if ((is_array($res) && !empty($res)) || ($res instanceof WireArray && $res->count())) {
 				$nextprop = reset($names);
 				if (count($names) == 1 && $nextprop == 'count') {
 					if (is_array($res)) return (string) count($res);
@@ -248,7 +386,7 @@ class ProcessExportPagesCSV extends Process {
 							$prop = wirePopulateStringTags($nextprop, $page, ['tagOpen' => '[', 'tagClose' => ']']);
 							$values[] = $item->$prop;
 						}
-						else $values = array_merge($values, $this->___getPageValue($item, null, $names, true));
+						else $values = array_merge($values, $this->getPageValue($item, null, $names, true));
 						continue;
 					}
 					if (is_object($item) && count($names) == 1 && method_exists($item, 'get')) {
@@ -258,9 +396,11 @@ class ProcessExportPagesCSV extends Process {
 					if (is_string($item) || is_numeric($item) || (is_object($item) && method_exists("$item", '__toString'))) $values[] = "$item";
 				}
 			}
+
 			else if ($res instanceof Page) {
-				$values[] = $this->___getPageValue($res, null, $names);
+				$values[] = $this->getPageValue($res, null, $names);
 			}
+
 			else if ($obj = is_object($res) || is_string($res) || is_numeric($res)) {
 
 				$res = $page->getFormatted($prop);
@@ -269,11 +409,12 @@ class ProcessExportPagesCSV extends Process {
 				}
 				$values[] = "$res";
 			}
+
 			else $values[] = '';
 		}
 		foreach ($values as &$value) {
-			if ($value === null) $value = 'NULL';
-			if ($value === '') $value = '…'; // empty string, elipsis
+			if ($value === null) $value = $this->placeholder_null;
+			if ($value === '') $value = $this->placeholder_empty;
 			if (strpos($value, '&') !== false) $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML401 | ENT_XML1 | ENT_XHTML | ENT_HTML5, 'UTF-8');
 			if (strpos($value, '<') !== false) $value = strip_tags($value);
 		}
