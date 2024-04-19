@@ -13,7 +13,7 @@
  * made for ProcessWire 3.x by Ryan Cramer 
  * http://processwire.com
  *
- * @version 1.0.5
+ * @version 1.0.6 - 2024-04-18
  *
  * changelog
  * @since 1.0.0 - init - 2022-02-10
@@ -22,6 +22,8 @@
  * @since 1.0.3 - fixed bug: fallback to default language if option titles not set in user language - 2022-05-03
  * @since 1.0.4 - made some functions public / hookable - 2023-03-14
  * @since 1.0.5 - added export options - 2023-06-28
+ * @since 1.0.6 - made export of user fields optional - 2024-04-18
+ * 
  * @todo add ASM Select to filter and order columns for export including user fields
  *
  */
@@ -76,6 +78,11 @@ class ProcessExportPagesCSV extends Process {
 	 */
 	public $export_selector_init = '';
 
+	/**
+	 * @var allow to export user fields, should be disabled if created / modified user is guest
+	 * 
+	 */
+	 public $allow_export_user_fields = true;
 
 	/**
 	 * @var placeholder in empty (elipsis)
@@ -97,7 +104,7 @@ class ProcessExportPagesCSV extends Process {
 		return array(
 			'title' => __('Export Pages Data CSV', __FILE__),          
 			'summary' => __('Module to be implemented by other Processes to provide CSV export.', __FILE__), 
-			'version' => 105, 
+			'version' => 106, 
 			'permission' => 'export-csv',
 			'autoload' => 'template=admin',
 			'icon' => 'download',
@@ -206,21 +213,23 @@ class ProcessExportPagesCSV extends Process {
 		// TODO add ASM Select to filter and order columns for export including user fields
 
 		// select created user fields (if populated) to be added to the export
-		$f = $this->modules->get('InputfieldCheckboxes');
-		$f->attr('id+name', 'userFields');
-		$f->label = $this->_('Created user fields to be added to each page data set');
-		$f->optionColumns = 3;
-		// $f->optionWidth = 1;
-		$lang = wire('user')->language->isDefault()? '' : wire('user')->language->id;
-		$userFields = wire('templates')->get('user')->fields->sort("label$lang, label, name");
-		foreach($userFields as $option) {
-			if (strpos($option->type->name, 'FieldtypeFieldset') === 0) continue;
-			if ($option->type->name == 'FieldtypePassword') continue;
-			if (in_array($f->name, ['page_icon'])) continue;
-			$option = $option->getContext('user');
-			$f->addOption($option->id, $option->get("label$lang|label|name"));
+		if ($this->allow_export_user_fields) {
+			$f = $this->modules->get('InputfieldCheckboxes');
+			$f->attr('id+name', 'userFields');
+			$f->label = $this->_('Created user fields to be added to each page data set');
+			$f->optionColumns = 3;
+			// $f->optionWidth = 1;
+			$lang = wire('user')->language->isDefault()? '' : wire('user')->language->id;
+			$userFields = wire('templates')->get('user')->fields->sort("label$lang, label, name");
+			foreach($userFields as $option) {
+				if (strpos($option->type->name, 'FieldtypeFieldset') === 0) continue;
+				if ($option->type->name == 'FieldtypePassword') continue;
+				if (in_array($f->name, ['page_icon'])) continue;
+				$option = $option->getContext('user');
+				$f->addOption($option->id, $option->get("label$lang|label|name"));
+			}
+			$form->append($f);
 		}
-		$form->append($f);
 
 		$f = $this->modules->get('InputfieldSubmit');
 		$f->attr('name', 'submit_export_csv'); 
@@ -243,7 +252,7 @@ class ProcessExportPagesCSV extends Process {
 		$selector = implode(', ',array($form->expo->initValue, $form->expo->value));
 		if ($selector) {
 			$exportColumns = [];
-			if (!empty($form->userFields->attr('value'))) {
+			if (isset($form->userFields) && !empty($form->userFields->attr('value'))) {
 				foreach ($form->userFields->attr('value') as $userField) {
 					$f = wire('fields')->get($userField);
 					$key = 'label|name';
