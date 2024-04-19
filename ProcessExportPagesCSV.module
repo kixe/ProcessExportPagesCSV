@@ -258,7 +258,8 @@ class ProcessExportPagesCSV extends Process {
 		$this->export_options_labels = $form->exportOptionsLabels->value? true : false;
 		$this->export_binary_text = $form->exportBinaryText->value? true : false;
 
-		$selector = trim(implode(', ',array($form->expo->initValue, $form->expo->value)), ', ');
+		$selector = '';
+		if ($form->expo) $selector = trim(implode(', ',array($form->expo->initValue, $form->expo->value)), ', ');
 		if (!$selector) $selector = trim($this->export_selector_init,"\x00..\x20,");
 		if ($selector) {
 			$exportColumns = [];
