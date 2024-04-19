@@ -13,7 +13,7 @@
  * made for ProcessWire 3.x by Ryan Cramer 
  * http://processwire.com
  *
- * @version 1.0.6 - 2024-04-18
+ * @version 1.0.7 - 2024-04-19
  *
  * changelog
  * @since 1.0.0 - init - 2022-02-10
@@ -23,6 +23,7 @@
  * @since 1.0.4 - made some functions public / hookable - 2023-03-14
  * @since 1.0.5 - added export options - 2023-06-28
  * @since 1.0.6 - made export of user fields optional - 2024-04-18
+ * @since 1.0.7 - made further filtering for export optional - 2024-04-19
  * 
  * @todo add ASM Select to filter and order columns for export including user fields
  *
@@ -82,7 +83,13 @@ class ProcessExportPagesCSV extends Process {
 	 * @var allow to export user fields, should be disabled if created / modified user is guest
 	 * 
 	 */
-	 public $allow_export_user_fields = true;
+	public $allow_export_user_fields = true;
+
+	/**
+	 * @var allow further filtering for export, disable via hook in ProcessExportPagesCSV::buildExportForm()
+	 * 
+	 */
+	public $allow_export_filter = true;
 
 	/**
 	 * @var placeholder in empty (elipsis)
@@ -104,7 +111,7 @@ class ProcessExportPagesCSV extends Process {
 		return array(
 			'title' => __('Export Pages Data CSV', __FILE__),          
 			'summary' => __('Module to be implemented by other Processes to provide CSV export.', __FILE__), 
-			'version' => 106, 
+			'version' => 107, 
 			'permission' => 'export-csv',
 			'autoload' => 'template=admin',
 			'icon' => 'download',
@@ -153,41 +160,43 @@ class ProcessExportPagesCSV extends Process {
 		$f->set('markupText', $text);
 		$form->append($f);
 
-		$f = $this->modules->get('InputfieldSelector');
-		$f->attr('id+name', 'expo'); 
-		$f->label = $this->_('Further filtering');
-		$f->set('addLabel', $this->_('Add Filter'));
-		$f->initValue = $initValue;
+		if ($this->allow_export_filter) {
+			$f = $this->modules->get('InputfieldSelector');
+			$f->attr('id+name', 'expo'); 
+			$f->label = $this->_('Further filtering');
+			$f->set('addLabel', $this->_('Add Filter'));
+			$f->initValue = $initValue;
 
-		$previewColumns = [];
-		foreach ($this->exportColumns as $exportColumn) {
-			$parts = explode('.', $exportColumn);
-			if (strpos(end($parts), '{') !== false || strpos(end($parts), '[') !== false) {
-				array_pop($parts);
-				$previewColumns[] = implode('.', $parts);
+			$previewColumns = [];
+			foreach ($this->exportColumns as $exportColumn) {
+				$parts = explode('.', $exportColumn);
+				if (strpos(end($parts), '{') !== false || strpos(end($parts), '[') !== false) {
+					array_pop($parts);
+					$previewColumns[] = implode('.', $parts);
+				}
+				else $previewColumns[] = $exportColumn;
 			}
-			else $previewColumns[] = $exportColumn;
-		}
-		$f->previewColumns = $previewColumns;
+			$f->previewColumns = $previewColumns;
 
-		$exclude = array();
-		if (!empty($this->exportSelectorFields)) {
-			foreach (wire('fields') as $field) {
-				if (in_array($field->name, $this->exportSelectorFields)) continue;
-				$exclude[] = $field->name;
+			$exclude = array();
+			if (!empty($this->exportSelectorFields)) {
+				foreach (wire('fields') as $field) {
+					if (in_array($field->name, $this->exportSelectorFields)) continue;
+					$exclude[] = $field->name;
+				}
 			}
+			
+			// $f->limitFields = array();
+			// we use exclude instead
+			//  $f->exclude = $exclude;
+
+			$f->showFieldLabels = 1; // 0: show names (default), 1: show labels, 2: show both (label [name])
+			$f->allowSubselectors = true;
+			$f->allowSubfields = true;
+			$f->optgroupsOrder = 'system,field,subfield,modifier';
+
+			$form->append($f);
 		}
-		
-		// $f->limitFields = array();
-		// we use exclude instead
-		//  $f->exclude = $exclude;
-
-		$f->showFieldLabels = 1; // 0: show names (default), 1: show labels, 2: show both (label [name])
-		$f->allowSubselectors = true;
-		$f->allowSubfields = true;
-		$f->optgroupsOrder = 'system,field,subfield,modifier';
-
-		$form->append($f);
 
 		$f = $this->modules->get('InputfieldCheckbox');
 		$f->attr('id+name', 'exportOptionsPerColumn');
@@ -249,7 +258,8 @@ class ProcessExportPagesCSV extends Process {
 		$this->export_options_labels = $form->exportOptionsLabels->value? true : false;
 		$this->export_binary_text = $form->exportBinaryText->value? true : false;
 
-		$selector = implode(', ',array($form->expo->initValue, $form->expo->value));
+		$selector = trim(implode(', ',array($form->expo->initValue, $form->expo->value)), ', ');
+		if (!$selector) $selector = trim($this->export_selector_init,"\x00..\x20,");
 		if ($selector) {
 			$exportColumns = [];
 			if (isset($form->userFields) && !empty($form->userFields->attr('value'))) {
@@ -263,8 +273,7 @@ class ProcessExportPagesCSV extends Process {
 			$exportColumns = array_merge($this->exportColumns, $exportColumns);
 			$data = $this->createDataArray($selector, $exportColumns);
 			$this->export($data); // no further processing
-		}
-
+		}		
 		return $form;
 	}
 
