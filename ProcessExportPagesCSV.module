@@ -13,7 +13,7 @@
  * made for ProcessWire 3.x by Ryan Cramer 
  * http://processwire.com
  *
- * @version 1.0.7 - 2024-04-19
+ * @version 1.0.8 - 2025-02-05
  *
  * changelog
  * @since 1.0.0 - init - 2022-02-10
@@ -24,6 +24,7 @@
  * @since 1.0.5 - added export options - 2023-06-28
  * @since 1.0.6 - made export of user fields optional - 2024-04-18
  * @since 1.0.7 - made further filtering for export optional - 2024-04-19
+ * @since 1.0.8 - added option to export URLs to assets (Pagefile, Pagefiles, Images ... ) - 2025-02-05
  * 
  * @todo add ASM Select to filter and order columns for export including user fields
  *
@@ -111,7 +112,7 @@ class ProcessExportPagesCSV extends Process {
 		return array(
 			'title' => __('Export Pages Data CSV', __FILE__),          
 			'summary' => __('Module to be implemented by other Processes to provide CSV export.', __FILE__), 
-			'version' => 107, 
+			'version' => 108, 
 			'permission' => 'export-csv',
 			'autoload' => 'template=admin',
 			'icon' => 'download',
@@ -263,7 +264,7 @@ class ProcessExportPagesCSV extends Process {
 		if (!$selector) $selector = trim($this->export_selector_init,"\x00..\x20,");
 		if ($selector) {
 			$exportColumns = [];
-			if (isset($form->userFields) && !empty($form->userFields->attr('value'))) {
+			if ($form->userFields && !empty($form->userFields->attr('value'))) {
 				foreach ($form->userFields->attr('value') as $userField) {
 					$f = wire('fields')->get($userField);
 					$key = 'label|name';
@@ -352,12 +353,23 @@ class ProcessExportPagesCSV extends Process {
 		$values = array();
 		$page->of(false);
 		// subfield or subproperty
+		$name = (string) $name;
 		if(strpos($name, '.')) $names = explode('.', $name);
 		else if (strlen($name)) $names = array($name);
 		$name = null;
 		if (count($names)) {
 			$prop = array_shift($names);
 			$res = $page->get($prop);
+
+			if ($res instanceof Pagefiles) {
+				$row = [];
+				foreach ($res as $f) $row[] = $f->get('httpUrl');
+				$values[] = implode(", ", $row);
+			}
+
+			if ($res instanceof Pagefile) {
+				$values[] = $res->get('httpUrl');
+			}
 
 			if ($res instanceof SelectableOptionArray) {
 				$row = [];
