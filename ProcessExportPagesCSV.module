@@ -13,7 +13,7 @@
  * made for ProcessWire 3.x by Ryan Cramer 
  * http://processwire.com
  *
- * @version 1.0.8 - 2025-02-05
+ * @version 1.0.9 - 2025-02-27
  *
  * changelog
  * @since 1.0.0 - init - 2022-02-10
@@ -25,6 +25,7 @@
  * @since 1.0.6 - made export of user fields optional - 2024-04-18
  * @since 1.0.7 - made further filtering for export optional - 2024-04-19
  * @since 1.0.8 - added option to export URLs to assets (Pagefile, Pagefiles, Images ... ) - 2025-02-05
+ * @since 1.0.9 - added option to export language specific values via dot syntax e.g. "fieldname.data" and "fieldname.data1234" - 2025-02-27
  * 
  * @todo add ASM Select to filter and order columns for export including user fields
  *
@@ -112,7 +113,7 @@ class ProcessExportPagesCSV extends Process {
 		return array(
 			'title' => __('Export Pages Data CSV', __FILE__),          
 			'summary' => __('Module to be implemented by other Processes to provide CSV export.', __FILE__), 
-			'version' => 108, 
+			'version' => 109, 
 			'permission' => 'export-csv',
 			'autoload' => 'template=admin',
 			'icon' => 'download',
@@ -360,18 +361,33 @@ class ProcessExportPagesCSV extends Process {
 		if (count($names)) {
 			$prop = array_shift($names);
 			$res = $page->get($prop);
+			if ($res instanceof Pageimages) {
+				$row = [];
+				foreach ($res as $f) {
+					// $f = $f->getOriginal();
+					// if (!$f) continue;
+					$row[] = $f->get('httpUrl');
+				}
+				$values[] = implode(", ", $row);
+			}
 
-			if ($res instanceof Pagefiles) {
+			else if ($res instanceof Pageimage) {
+				// $res = $f->getOriginal();
+				// if (!$res) return null;
+				$values[] = $res->get('httpUrl');
+			}
+
+			else if ($res instanceof Pagefiles) {
 				$row = [];
 				foreach ($res as $f) $row[] = $f->get('httpUrl');
 				$values[] = implode(", ", $row);
 			}
 
-			if ($res instanceof Pagefile) {
-				$values[] = $res->get('httpUrl');
+			else if ($res instanceof Pagefile) {
+				$values[] = $res->get('original')->get('httpUrl');
 			}
 
-			if ($res instanceof SelectableOptionArray) {
+			else if ($res instanceof SelectableOptionArray) {
 				$row = [];
 				foreach ($res as $selectedOption) $row[] = $this->export_options_labels? $selectedOption->getTitle() : $selectedOption->get('value|id');
 				$values[] = implode(", ", $row);
@@ -392,6 +408,18 @@ class ProcessExportPagesCSV extends Process {
 					}
 					$values[] = implode("\n",$rows);
 				}
+			}
+		
+			else if ($res instanceof LanguagesPageFieldValue) {
+				$langID = wire('user')->language->id;
+				if (count($names)) {
+					$nextprop = reset($names);
+					if (strpos($nextprop, 'data') === 0) {
+						$a = array_filter(explode('data', $nextprop));
+						$langID = (int) reset($a)?: wire('languages')->default->id;
+					}
+				}
+				$values[] = $res->getLanguageValue($langID);
 			}
 
 			else if ((is_array($res) && !empty($res)) || ($res instanceof WireArray && $res->count())) {
