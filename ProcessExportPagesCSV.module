@@ -13,7 +13,7 @@
  * made for ProcessWire 3.x by Ryan Cramer 
  * http://processwire.com
  *
- * @version 1.0.9 - 2025-02-27
+ * @version 1.1.0 - 2025-11-04
  *
  * changelog
  * @since 1.0.0 - init - 2022-02-10
@@ -26,6 +26,7 @@
  * @since 1.0.7 - made further filtering for export optional - 2024-04-19
  * @since 1.0.8 - added option to export URLs to assets (Pagefile, Pagefiles, Images ... ) - 2025-02-05
  * @since 1.0.9 - added option to export language specific values via dot syntax e.g. "fieldname.data" and "fieldname.data1234" - 2025-02-27
+ * @since 1.1.0 - added options to optionally export created user ID and Name - 2025-11-04
  * 
  * @todo add ASM Select to filter and order columns for export including user fields
  *
@@ -113,7 +114,7 @@ class ProcessExportPagesCSV extends Process {
 		return array(
 			'title' => __('Export Pages Data CSV', __FILE__),          
 			'summary' => __('Module to be implemented by other Processes to provide CSV export.', __FILE__), 
-			'version' => 109, 
+			'version' => 110, 
 			'permission' => 'export-csv',
 			'autoload' => 'template=admin',
 			'icon' => 'download',
@@ -239,6 +240,8 @@ class ProcessExportPagesCSV extends Process {
 				$option = $option->getContext('user');
 				$f->addOption($option->id, $option->get("label$lang|label|name"));
 			}
+			$f->addOption('id', $option->get("ID"));
+			$f->addOption('name', $option->get("Name"));
 			$form->append($f);
 		}
 
@@ -267,6 +270,14 @@ class ProcessExportPagesCSV extends Process {
 			$exportColumns = [];
 			if ($form->userFields && !empty($form->userFields->attr('value'))) {
 				foreach ($form->userFields->attr('value') as $userField) {
+					if ($userField == 'id') {
+						$exportColumns['ID'] = 'createdUser.id';
+						continue;
+					}
+					if ($userField == 'name') {
+						$exportColumns['Name'] = 'createdUser.name';
+						continue;
+					}
 					$f = wire('fields')->get($userField);
 					$key = 'label|name';
 					if (!wire('user')->language->isDefault()) $key = 'label' . wire('user')->language->id . '|label|name';
